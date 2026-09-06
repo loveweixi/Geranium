@@ -1,84 +1,80 @@
-//
-//  BookMarkHelper.swift
-//  Geranium
-//
-//  Created by cclerc on 21.12.23.
-//
-
 import Foundation
-import SwiftUI
 
-let sharedUserDefaultsSuiteName = "group.live.cclerc.geraniumBookmarks"
-
-func BookMarkSave(lat: Double, long: Double, name: String) -> Bool {
-    let bookmark: [String: Any] = ["name": name, "lat": lat, "long": long]
-    var bookmarks = BookMarkRetrieve()
-    bookmarks.append(bookmark)
-    let sharedUserDefaults = UserDefaults(suiteName: sharedUserDefaultsSuiteName)
-    sharedUserDefaults?.set(bookmarks, forKey: "bookmarks")
-    successVibrate()
-    return true
+struct SavedLocation: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let coordinate: SimulatedCoordinate
 }
 
-func BookMarkRetrieve() -> [[String: Any]] {
-    let sharedUserDefaults = UserDefaults(suiteName: sharedUserDefaultsSuiteName)
-    if let bookmarks = sharedUserDefaults?.array(forKey: "bookmarks") as? [[String: Any]] {
-        return bookmarks
-    } else {
-        return []
+enum SavedLocationStore {
+    static let suiteName = "group.live.cclerc.geraniumBookmarks"
+    private static let storageKey = "bookmarks"
+
+    static func load() -> [SavedLocation] {
+        guard let records = defaults.array(forKey: storageKey) as? [[String: Any]] else {
+            return []
+        }
+
+        return records.compactMap { record in
+            guard let latitude = number(from: record["lat"]),
+                  let longitude = number(from: record["long"]) else { return nil }
+
+            let storedName = (record["name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let fallbackName = String(format: "%.5f, %.5f", latitude, longitude)
+            let identifier = (record["id"] as? String).flatMap(UUID.init(uuidString:)) ?? UUID()
+
+            return SavedLocation(
+                id: identifier,
+                name: storedName.isEmpty ? fallbackName : storedName,
+                coordinate: SimulatedCoordinate(latitude: latitude, longitude: longitude)
+            )
+        }
     }
-}
 
-func isThereAnyMika() -> Bool {
-    let plistPath = "/var/mobile/Library/Preferences/com.mika.LocationSimulation.plist"
-    guard FileManager.default.fileExists(atPath: plistPath) else {
-        return false
+    static func add(name: String, coordinate: SimulatedCoordinate) -> [SavedLocation] {
+        var locations = load()
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = trimmedName.isEmpty
+            ? String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)
+            : trimmedName
+
+        locations.append(
+            SavedLocation(id: UUID(), name: displayName, coordinate: coordinate)
+        )
+        save(locations)
+        return locations
     }
 
-    do {
-        let data = try Data(contentsOf: URL(fileURLWithPath: plistPath))
-        var format: PropertyListSerialization.PropertyListFormat = .xml
-        let plist = try PropertyListSerialization.propertyList(from: data, options: .mutableContainersAndLeaves, format: &format)
-        guard let plistDict = plist as? [String: Any] else {
-            print("Plist is not a dictionary.")
-            return false
+    static func delete(at offsets: IndexSet, from locations: [SavedLocation]) -> [SavedLocation] {
+        var updatedLocations = locations
+        for index in offsets.sorted(by: >) {
+            updatedLocations.remove(at: index)
         }
-        if let datasArray = plistDict["datas"] as? [Any] {
-            return true
-        } else {
-            return false
-        }
-
-    } catch {
-        return false
+        save(updatedLocations)
+        return updatedLocations
     }
-}
 
-
-func importMika() {
-    let plistPath = "/var/mobile/Library/Preferences/com.mika.LocationSimulation.plist"
-
-    do {
-        let data = try Data(contentsOf: URL(fileURLWithPath: plistPath))
-        var format: PropertyListSerialization.PropertyListFormat = .xml
-        let plist = try PropertyListSerialization.propertyList(from: data, options: .mutableContainersAndLeaves, format: &format)
-        guard let plistDict = plist as? [String: Any] else {
-            print("not a dictionary")
-            return
+    static func save(_ locations: [SavedLocation]) {
+        let records = locations.map { location in
+            [
+                "id": location.id.uuidString,
+                "name": location.name,
+                "lat": location.coordinate.latitude,
+                "long": location.coordinate.longitude
+            ] as [String: Any]
         }
-        if let datasArray = plistDict["datas"] as? [[String: Any]] {
-            for dataDict in datasArray {
-                if let la = dataDict["la"] as? Double,
-                   let lo = dataDict["lo"] as? Double,
-                   let remark = dataDict["remark"] as? String {
-                    BookMarkSave(lat: la, long: lo, name: remark)
-                }
-            }
-        } else {
-            print("datas not there")
+        defaults.set(records, forKey: storageKey)
+    }
+
+    private static var defaults: UserDefaults {
+        UserDefaults(suiteName: suiteName) ?? .standard
+    }
+
+    private static func number(from value: Any?) -> Double? {
+        if let number = value as? NSNumber {
+            return number.doubleValue
         }
-        UIApplication.shared.alert(title:"Done !",body:"Your saved bookmarks/records from Mika's LocSim were imported.")
-    } catch {
-        print("cant read file \(error)")
+        return value as? Double
     }
 }

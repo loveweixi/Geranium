@@ -1,50 +1,20 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "CFBundleName" : {
-      "comment" : "Bundle name",
-      "extractionState" : "extracted_with_value",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Geranium"
-          }
-        }
-      }
-    },
-    "NSLocationUsageDescription" : {
-      "comment" : "Privacy - Location Usage Description",
-      "extractionState" : "extracted_with_value",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Enabling location for Geranium makes it possible for the app to display your location on the map."
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "위치 권한을 허용하면 앱 지도에 현재 위치를 표시할 수 있습니다."
-          }
-        }
-      }
-    },
     "NSLocationWhenInUseUsageDescription" : {
       "comment" : "Privacy - Location When In Use Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "new",
-            "value" : "This will allow the app to display your location on the LocSim map."
+            "state" : "translated",
+            "value" : "Geranium uses your location only to center the map."
           }
         },
-        "ko" : {
+        "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "현재 위치를 LocSim 지도에 표시할 수 있도록 합니다."
+            "value" : "Geranium 仅使用你的当前位置来居中显示地图。"
           }
         }
       }

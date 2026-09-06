@@ -1,84 +1,92 @@
 import UIKit
-import SwiftUI
-import MobileCoreServices
 import UniformTypeIdentifiers
 
-class ActionViewController: UIViewController {
+final class ActionViewController: UIViewController {
+    @IBOutlet private weak var textField: UITextField!
 
-    @IBOutlet weak var imageView: UIImageView!
-    @IBOutlet weak var textField: UITextField!
-    var latitudeDouble: Double = 0.0
-    var longitudeDouble: Double = 0.0
-    override func viewDidLoad() {
-        super.viewDidLoad()
-    }
+    private let suiteName = "group.live.cclerc.geraniumBookmarks"
+    private let storageKey = "bookmarks"
 
-    // Helper method to extract query parameters from URL
-    private func getParameter(from url: URL, key: String) -> String? {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
-              let queryItems = components.queryItems else {
-            return nil
+    @IBAction private func saveButtonPressed(_ sender: UIButton) {
+        sender.isEnabled = false
+
+        guard let provider = firstURLProvider() else {
+            sender.isEnabled = true
+            presentError("No map location was found in the shared item.")
+            return
         }
-        
-        return queryItems.first { $0.name == key }?.value
-    }
 
-    @IBAction func saveButtonPressed(_ sender: UIButton) {
-        if let sharedItems = extensionContext?.inputItems as? [NSExtensionItem],
-           let firstItem = sharedItems.first,
-           let attachments = firstItem.attachments {
-            
-            for provider in attachments {
-                if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier as String) {
-                    provider.loadItem(forTypeIdentifier: UTType.url.identifier as String, options: nil, completionHandler: { (url, error) in
-                        if let url = url as? URL {
-                            if let latitude = self.getParameter(from: url, key: "ll")?.components(separatedBy: ",").first,
-                               let longitude = self.getParameter(from: url, key: "ll")?.components(separatedBy: ",").last,
-                               let latitudeDouble = Double(latitude),
-                               let longitudeDouble = Double(longitude) {
-                                DispatchQueue.main.async {
-                                    let bookmarkName = self.textField.text
-                                    print(self.BookMarkSave(lat: latitudeDouble, long: longitudeDouble, name: bookmarkName ?? ""))
-                                    self.done()
-                                }
-                            }
-                        }
-                    })
+        provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { [weak self, weak sender] item, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let url = item as? URL,
+                      let coordinate = self.coordinate(from: url) else {
+                    sender?.isEnabled = true
+                    self.presentError("This link does not contain usable coordinates.")
+                    return
                 }
+
+                self.save(
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude,
+                    name: self.textField.text ?? ""
+                )
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                self.done()
             }
         }
-        dismiss(animated: true) {
+    }
+
+    @IBAction private func done() {
+        extensionContext?.completeRequest(returningItems: nil)
+    }
+
+    private func firstURLProvider() -> NSItemProvider? {
+        let items = extensionContext?.inputItems as? [NSExtensionItem]
+        return items?
+            .compactMap(\.attachments)
+            .flatMap { $0 }
+            .first { $0.hasItemConformingToTypeIdentifier(UTType.url.identifier) }
+    }
+
+    private func coordinate(from url: URL) -> (latitude: Double, longitude: Double)? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+              let value = components.queryItems?.first(where: { $0.name == "ll" })?.value else {
+            return nil
         }
-    }
 
-    @IBAction func done() {
-        self.extensionContext?.completeRequest(returningItems: self.extensionContext!.inputItems, completionHandler: nil)
-    }
-    
-    let sharedUserDefaultsSuiteName = "group.live.cclerc.geraniumBookmarks"
-
-    func BookMarkSave(lat: Double, long: Double, name: String) -> Bool {
-        let bookmark: [String: Any] = ["name": name, "lat": lat, "long": long]
-        var bookmarks = BookMarkRetrieve()
-        bookmarks.append(bookmark)
-        let sharedUserDefaults = UserDefaults(suiteName: sharedUserDefaultsSuiteName)
-        sharedUserDefaults?.set(bookmarks, forKey: "bookmarks")
-        successVibrate()
-        return true
-    }
-
-    func BookMarkRetrieve() -> [[String: Any]] {
-        let sharedUserDefaults = UserDefaults(suiteName: sharedUserDefaultsSuiteName)
-        if let bookmarks = sharedUserDefaults?.array(forKey: "bookmarks") as? [[String: Any]] {
-            return bookmarks
-        } else {
-            return []
+        let parts = value.split(separator: ",", maxSplits: 1).map(String.init)
+        guard parts.count == 2,
+              let latitude = Double(parts[0]),
+              let longitude = Double(parts[1]),
+              (-90...90).contains(latitude),
+              (-180...180).contains(longitude) else {
+            return nil
         }
-    }
-}
 
-// shortened vibrate object
-func successVibrate() {
-    let generator = UINotificationFeedbackGenerator()
-    generator.notificationOccurred(.success)
+        return (latitude, longitude)
+    }
+
+    private func save(latitude: Double, longitude: Double, name: String) {
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        var records = defaults.array(forKey: storageKey) as? [[String: Any]] ?? []
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = trimmedName.isEmpty
+            ? String(format: "%.5f, %.5f", latitude, longitude)
+            : trimmedName
+
+        records.append([
+            "id": UUID().uuidString,
+            "name": displayName,
+            "lat": latitude,
+            "long": longitude
+        ])
+        defaults.set(records, forKey: storageKey)
+    }
+
+    private func presentError(_ message: String) {
+        let alert = UIAlertController(title: "Unable to Save", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
 }

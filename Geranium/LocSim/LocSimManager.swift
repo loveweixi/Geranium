@@ -1,75 +1,77 @@
-//
-//  LocSimManager.swift
-//  Geranium
-//
-//  Created by Constantin Clerc on 12.11.2022.
-//
-
-import Foundation
 import CoreLocation
+import Combine
+import Foundation
 
+final class LocSimManager {
+    private static let simulationManager = CLSimulationManager()
 
-class LocSimManager {
-    static let simManager = CLSimulationManager()
-    
-    /// Updates timezone
-    static func post_required_timezone_update(){
-        CFNotificationCenterPostNotificationWithOptions(CFNotificationCenterGetDarwinNotifyCenter(), .init("AutomaticTimeZoneUpdateNeeded" as CFString), nil, nil, kCFNotificationDeliverImmediately);
+    static func start(at coordinate: SimulatedCoordinate) {
+        let location = CLLocation(
+            coordinate: coordinate.coreLocationCoordinate,
+            altitude: 0,
+            horizontalAccuracy: 5,
+            verticalAccuracy: 5,
+            timestamp: Date()
+        )
+
+        simulationManager.stopLocationSimulation()
+        simulationManager.clearSimulatedLocations()
+        simulationManager.appendSimulatedLocation(location)
+        simulationManager.flush()
+        simulationManager.startLocationSimulation()
+        notifyAutomaticTimeZoneUpdate()
     }
-    
-    /// Starts a location simulation of specified argument "location"
-    // TODO: save
-    static func startLocSim(location: CLLocation) {
-        simManager.stopLocationSimulation()
-        simManager.clearSimulatedLocations()
-        simManager.appendSimulatedLocation(location)
-        simManager.flush()
-        simManager.startLocationSimulation()
-        post_required_timezone_update();
+
+    static func stop() {
+        simulationManager.stopLocationSimulation()
+        simulationManager.clearSimulatedLocations()
+        simulationManager.flush()
+        notifyAutomaticTimeZoneUpdate()
     }
-    
-    /// Stops location simulation
-    static func stopLocSim(){
-        simManager.stopLocationSimulation()
-        simManager.clearSimulatedLocations()
-        simManager.flush()
-        post_required_timezone_update();
+
+    private static func notifyAutomaticTimeZoneUpdate() {
+        CFNotificationCenterPostNotificationWithOptions(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            .init("AutomaticTimeZoneUpdateNeeded" as CFString),
+            nil,
+            nil,
+            kCFNotificationDeliverImmediately
+        )
     }
 }
 
+struct SimulatedCoordinate: Equatable {
+    let latitude: Double
+    let longitude: Double
 
-struct EquatableCoordinate: Equatable {
-    var coordinate: CLLocationCoordinate2D
-    
-    static func ==(lhs: EquatableCoordinate, rhs: EquatableCoordinate) -> Bool {
-        lhs.coordinate.latitude == rhs.coordinate.latitude && lhs.coordinate.longitude == rhs.coordinate.longitude
+    init(latitude: Double, longitude: Double) {
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+
+    init(_ coordinate: CLLocationCoordinate2D) {
+        self.init(latitude: coordinate.latitude, longitude: coordinate.longitude)
+    }
+
+    var coreLocationCoordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 }
 
-
-// https://stackoverflow.com/a/75703059
-
-class LocationModel: NSObject, ObservableObject {
+final class LocationAuthorizationModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()
-    @Published var authorisationStatus: CLAuthorizationStatus = .notDetermined
+    @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
 
     override init() {
         super.init()
-        self.locationManager.delegate = self
+        locationManager.delegate = self
     }
 
-    public func requestAuthorisation(always: Bool = false) {
-        if always {
-            self.locationManager.requestAlwaysAuthorization()
-        } else {
-            self.locationManager.requestWhenInUseAuthorization()
-        }
+    func requestAuthorization() {
+        locationManager.requestWhenInUseAuthorization()
     }
-}
-
-extension LocationModel: CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        self.authorisationStatus = status
+        authorizationStatus = status
     }
 }
