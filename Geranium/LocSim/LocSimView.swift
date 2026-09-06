@@ -8,9 +8,10 @@ struct LocSimView: View {
     @StateObject private var searchModel = LocationSearchModel()
 
     @State private var selectedCoordinate: SimulatedCoordinate?
+    @State private var selectedName: String?
     @State private var activeCoordinate: SimulatedCoordinate?
     @State private var mapCameraTarget: MapCameraTarget?
-    @State private var mapDisplayState: MapDisplayState = .ready
+    @State private var mapErrorMessage: String?
     @State private var mapIdentity = UUID()
     @State private var savedLocations: [SavedLocation] = []
     @State private var searchText = ""
@@ -27,18 +28,22 @@ struct LocSimView: View {
 
             CustomMapView(
                 selectedCoordinate: $selectedCoordinate,
-                displayState: $mapDisplayState,
+                selectedName: $selectedName,
+                errorMessage: $mapErrorMessage,
                 cameraTarget: mapCameraTarget
             )
             .id(mapIdentity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
-
-            mapStateOverlay
 
             VStack(spacing: 10) {
                 searchPanel
 
-                Spacer(minLength: 160)
+                if let mapErrorMessage {
+                    mapErrorBanner(mapErrorMessage)
+                }
+
+                Spacer(minLength: 120)
 
                 controlPanel
             }
@@ -56,14 +61,14 @@ struct LocSimView: View {
                     name: name,
                     coordinate: coordinate
                 )
-                selectAndCenter(coordinate)
+                selectAndCenter(coordinate, name: name)
             }
         }
         .sheet(isPresented: $isShowingFavorites) {
             FavoriteLocationsView(
                 locations: $savedLocations,
                 onSelect: { location in
-                    selectAndCenter(location.coordinate)
+                    selectAndCenter(location.coordinate, name: location.name)
                 }
             )
         }
@@ -172,7 +177,7 @@ struct LocSimView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 210)
+                .frame(maxHeight: 160)
             } else if let errorMessage = searchModel.errorMessage {
                 Divider()
                 Text(errorMessage)
@@ -193,11 +198,12 @@ struct LocSimView: View {
             HStack(spacing: 12) {
                 if let selectedCoordinate {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("已选位置")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Text(selectedName ?? "已选位置")
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
                         Text(coordinateText(selectedCoordinate))
-                            .font(.subheadline.monospacedDigit().weight(.medium))
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(.secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
                     }
@@ -229,41 +235,27 @@ struct LocSimView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .disabled(activeCoordinate == nil)
             }
 
-            Button {
-                favoriteName = ""
-                isShowingFavoritePrompt = true
-            } label: {
-                Label("收藏当前位置", systemImage: "star")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(selectedCoordinate == nil)
-
-            Button {
-                isShowingAddLocation = true
-            } label: {
-                Label("添加位置", systemImage: "plus.circle")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-
-            Button {
-                isShowingFavorites = true
-            } label: {
-                HStack {
-                    Label("已收藏的位置", systemImage: "star.fill")
-                    Spacer()
-                    Text("\(savedLocations.count)")
-                        .foregroundColor(.secondary)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                compactActionButton(title: "收藏", systemImage: "star") {
+                    favoriteName = selectedName ?? ""
+                    isShowingFavoritePrompt = true
                 }
-                .frame(maxWidth: .infinity)
+                .disabled(selectedCoordinate == nil)
+
+                compactActionButton(title: "添加", systemImage: "plus.circle") {
+                    isShowingAddLocation = true
+                }
+
+                compactActionButton(
+                    title: "收藏夹 \(savedLocations.count)",
+                    systemImage: "star.fill"
+                ) {
+                    isShowingFavorites = true
+                }
             }
-            .buttonStyle(.bordered)
         }
         .padding(14)
         .frame(maxWidth: 560)
@@ -272,29 +264,44 @@ struct LocSimView: View {
         .shadow(color: .black.opacity(0.18), radius: 12, y: 5)
     }
 
-    @ViewBuilder
-    private var mapStateOverlay: some View {
-        switch mapDisplayState {
-        case .ready:
-            EmptyView()
-        case .failed(let message):
-            VStack(spacing: 10) {
-                Image(systemName: "map")
-                    .font(.title)
+    private func mapErrorBanner(_ message: String) -> some View {
+        Button {
+            mapErrorMessage = nil
+            mapIdentity = UUID()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
                 Text(message)
-                    .font(.subheadline)
-                    .multilineTextAlignment(.center)
-                Button("重新加载地图") {
-                    mapDisplayState = .ready
-                    mapIdentity = UUID()
-                }
-                .buttonStyle(.borderedProminent)
+                    .font(.caption)
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.clockwise")
+                    .font(.caption.weight(.semibold))
             }
-            .padding(18)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: 560)
             .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(30)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .buttonStyle(.plain)
+    }
+
+    private func compactActionButton(
+        title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
     }
 
     @ViewBuilder
@@ -328,13 +335,23 @@ struct LocSimView: View {
         let coordinate = SimulatedCoordinate(
             CoordTransform.gcj02ToWgs84(result.coordinate)
         )
-        searchText = result.name
+        searchText = ""
         searchModel.clear()
-        selectAndCenter(coordinate)
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        selectAndCenter(coordinate, name: result.name)
     }
 
-    private func selectAndCenter(_ coordinate: SimulatedCoordinate) {
+    private func selectAndCenter(
+        _ coordinate: SimulatedCoordinate,
+        name: String? = nil
+    ) {
         selectedCoordinate = coordinate
+        selectedName = name
         mapCameraTarget = MapCameraTarget(coordinate: coordinate)
         if activeCoordinate == nil {
             status = .ready

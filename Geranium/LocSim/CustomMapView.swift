@@ -1,11 +1,6 @@
 import MapKit
 import SwiftUI
 
-enum MapDisplayState: Equatable {
-    case ready
-    case failed(String)
-}
-
 struct MapCameraTarget: Equatable {
     let id = UUID()
     let coordinate: SimulatedCoordinate
@@ -13,14 +8,19 @@ struct MapCameraTarget: Equatable {
 
 struct CustomMapView: UIViewRepresentable {
     @Binding var selectedCoordinate: SimulatedCoordinate?
-    @Binding var displayState: MapDisplayState
+    @Binding var selectedName: String?
+    @Binding var errorMessage: String?
 
     let cameraTarget: MapCameraTarget?
 
     func makeUIView(context: Context) -> MKMapView {
-        let mapView = MKMapView(frame: .zero)
+        // Match the upstream construction path for iOS 15 compatibility. SwiftUI
+        // owns the final frame, but starting with MKMapView's default initializer
+        // avoids a zero-sized renderer during the first layout pass on older iPads.
+        let mapView = MKMapView()
         mapView.delegate = context.coordinator
         mapView.mapType = .standard
+        mapView.backgroundColor = .systemBackground
         mapView.showsUserLocation = true
         mapView.showsCompass = true
         mapView.showsScale = true
@@ -80,7 +80,7 @@ struct CustomMapView: UIViewRepresentable {
         var lastCameraTargetID: UUID?
 
         private var hasCenteredOnUser = false
-        private var hasLoadedMap = false
+        private var hasRenderedMap = false
 
         init(parent: CustomMapView) {
             self.parent = parent
@@ -94,6 +94,7 @@ struct CustomMapView: UIViewRepresentable {
             let point = gesture.location(in: mapView)
             let mapCoordinate = mapView.convert(point, toCoordinateFrom: mapView)
             let wgs84Coordinate = CoordTransform.gcj02ToWgs84(mapCoordinate)
+            parent.selectedName = nil
             parent.selectedCoordinate = SimulatedCoordinate(wgs84Coordinate)
         }
 
@@ -144,18 +145,18 @@ struct CustomMapView: UIViewRepresentable {
         }
 
         func mapViewDidFinishLoadingMap(_ mapView: MKMapView) {
-            hasLoadedMap = true
-            updateDisplayState(.ready)
+            hasRenderedMap = true
+            updateErrorMessage(nil)
         }
 
         func mapViewDidFailLoadingMap(_ mapView: MKMapView, withError error: Error) {
-            guard !hasLoadedMap else { return }
-            updateDisplayState(.failed("地图加载失败，请检查网络后重试。"))
+            guard !hasRenderedMap else { return }
+            updateErrorMessage("地图暂时无法载入，请检查网络或点此重试。")
         }
 
-        private func updateDisplayState(_ state: MapDisplayState) {
+        private func updateErrorMessage(_ message: String?) {
             DispatchQueue.main.async { [weak self] in
-                self?.parent.displayState = state
+                self?.parent.errorMessage = message
             }
         }
     }

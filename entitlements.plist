@@ -4,6 +4,31 @@
 <dict>
 	<key>platform-application</key>
 	<true/>
+	<!--
+		TrollStore platform apps run outside the normal application sandbox.
+		MapKit still needs explicit access to the GPU/IOSurface services, its
+		URL-loading helpers and the application's data containers.
+	-->
+	<key>com.apple.security.iokit-user-client-class</key>
+	<array>
+		<string>AGXDeviceUserClient</string>
+		<string>AGXSharedUserClient</string>
+		<string>AGXCommandQueue</string>
+		<string>AGXDevice</string>
+		<string>IOSurfaceRootUserClient</string>
+	</array>
+	<key>com.apple.security.exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.apple.nsurlsessiond</string>
+		<string>com.apple.nsurlsessiond.NSURLSessionProxyService</string>
+		<string>com.apple.nsurlstorage-cache</string>
+	</array>
+	<key>com.apple.private.security.storage.AppDataContainers</key>
+	<true/>
+	<key>com.apple.private.security.storage.MobileDocuments</key>
+	<true/>
+	<key>com.apple.private.security.container-manager</key>
+	<true/>
 	<key>com.apple.private.security.no-container</key>
 	<true/>
 	<key>com.apple.private.security.no-sandbox</key>
