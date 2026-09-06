@@ -10,7 +10,7 @@ struct LocSimView: View {
     @State private var selectedCoordinate: SimulatedCoordinate?
     @State private var activeCoordinate: SimulatedCoordinate?
     @State private var mapCameraTarget: MapCameraTarget?
-    @State private var mapDisplayState: MapDisplayState = .loading
+    @State private var mapDisplayState: MapDisplayState = .ready
     @State private var mapIdentity = UUID()
     @State private var savedLocations: [SavedLocation] = []
     @State private var searchText = ""
@@ -275,11 +275,6 @@ struct LocSimView: View {
     @ViewBuilder
     private var mapStateOverlay: some View {
         switch mapDisplayState {
-        case .loading:
-            ProgressView("正在加载地图…")
-                .padding(14)
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         case .ready:
             EmptyView()
         case .failed(let message):
@@ -290,7 +285,7 @@ struct LocSimView: View {
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
                 Button("重新加载地图") {
-                    mapDisplayState = .loading
+                    mapDisplayState = .ready
                     mapIdentity = UUID()
                 }
                 .buttonStyle(.borderedProminent)

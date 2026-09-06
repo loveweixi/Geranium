@@ -2,7 +2,6 @@ import MapKit
 import SwiftUI
 
 enum MapDisplayState: Equatable {
-    case loading
     case ready
     case failed(String)
 }
@@ -142,11 +141,6 @@ struct CustomMapView: UIViewRepresentable {
                 ),
                 animated: true
             )
-        }
-
-        func mapViewWillStartLoadingMap(_ mapView: MKMapView) {
-            guard !hasLoadedMap else { return }
-            updateDisplayState(.loading)
         }
 
         func mapViewDidFinishLoadingMap(_ mapView: MKMapView) {
