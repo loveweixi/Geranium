@@ -34,13 +34,31 @@ enum SavedLocationStore {
 
     static func add(name: String, coordinate: SimulatedCoordinate) -> [SavedLocation] {
         var locations = load()
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayName = trimmedName.isEmpty
-            ? String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)
-            : trimmedName
-
         locations.append(
-            SavedLocation(id: UUID(), name: displayName, coordinate: coordinate)
+            SavedLocation(
+                id: UUID(),
+                name: displayName(for: name, coordinate: coordinate),
+                coordinate: coordinate
+            )
+        )
+        save(locations)
+        return locations
+    }
+
+    static func update(
+        id: UUID,
+        name: String,
+        coordinate: SimulatedCoordinate
+    ) -> [SavedLocation] {
+        var locations = load()
+        guard let index = locations.firstIndex(where: { $0.id == id }) else {
+            return locations
+        }
+
+        locations[index] = SavedLocation(
+            id: id,
+            name: displayName(for: name, coordinate: coordinate),
+            coordinate: coordinate
         )
         save(locations)
         return locations
@@ -76,5 +94,15 @@ enum SavedLocationStore {
             return number.doubleValue
         }
         return value as? Double
+    }
+
+    private static func displayName(
+        for name: String,
+        coordinate: SimulatedCoordinate
+    ) -> String {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedName.isEmpty
+            ? String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)
+            : trimmedName
     }
 }
