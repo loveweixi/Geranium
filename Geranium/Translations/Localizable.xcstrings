@@ -186,7 +186,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "模拟中"
+            "value" : "进行中"
           }
         }
       }
@@ -196,7 +196,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开始模拟"
+            "value" : "开始"
           }
         }
       }
@@ -206,7 +206,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "结束模拟"
+            "value" : "结束"
           }
         }
       }
@@ -236,7 +236,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "点击收藏位置即可载入上方，然后点击“开始模拟”。"
+            "value" : "点击收藏位置即可载入上方，然后点击“开始”。"
           }
         }
       }

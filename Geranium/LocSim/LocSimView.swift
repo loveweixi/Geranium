@@ -17,8 +17,6 @@ struct LocSimView: View {
     @State private var searchText = ""
     @State private var isShowingAddLocation = false
     @State private var isShowingFavorites = false
-    @State private var isShowingFavoritePrompt = false
-    @State private var favoriteName = ""
     @State private var status: Status = .waitingForSelection
 
     var body: some View {
@@ -54,7 +52,7 @@ struct LocSimView: View {
         .sheet(isPresented: $isShowingAddLocation) {
             LocationEditorView(
                 title: "添加位置",
-                initialName: "",
+                initialName: selectedName ?? "",
                 initialCoordinate: selectedCoordinate
             ) { name, coordinate in
                 savedLocations = SavedLocationStore.add(
@@ -71,15 +69,6 @@ struct LocSimView: View {
                     selectAndCenter(location.coordinate, name: location.name)
                 }
             )
-        }
-        .alert("收藏当前位置", isPresented: $isShowingFavoritePrompt) {
-            TextField("位置名称", text: $favoriteName)
-            Button("取消", role: .cancel) {}
-            Button("保存") {
-                saveSelectedLocation()
-            }
-        } message: {
-            Text("输入一个方便识别的名称。")
         }
         .onAppear {
             locationAuthorization.requestAuthorization()
@@ -194,8 +183,21 @@ struct LocSimView: View {
     }
 
     private var controlPanel: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             HStack(spacing: 12) {
+                Image(systemName: selectedCoordinate == nil ? "hand.tap.fill" : "mappin.circle.fill")
+                    .font(.title2)
+                    .foregroundColor(selectedCoordinate == nil ? .secondary : .accentColor)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        Circle()
+                            .fill(
+                                selectedCoordinate == nil
+                                    ? Color.secondary.opacity(0.12)
+                                    : Color.accentColor.opacity(0.14)
+                            )
+                    )
+
                 if let selectedCoordinate {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(selectedName ?? "已选位置")
@@ -208,9 +210,13 @@ struct LocSimView: View {
                             .minimumScaleFactor(0.75)
                     }
                 } else {
-                    Label("轻点地图选择位置", systemImage: "hand.tap")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("选择一个位置")
+                            .font(.subheadline.weight(.semibold))
+                        Text("轻点地图、搜索或从收藏夹选择")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
                 Spacer()
@@ -221,8 +227,10 @@ struct LocSimView: View {
                 Button {
                     startSimulation()
                 } label: {
-                    Label("开始模拟", systemImage: "location.fill")
+                    Label("开始", systemImage: "location.fill")
+                        .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .frame(minHeight: 46)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
@@ -231,37 +239,39 @@ struct LocSimView: View {
                 Button(role: .destructive) {
                     stopSimulation()
                 } label: {
-                    Label("结束模拟", systemImage: "location.slash.fill")
+                    Label("结束", systemImage: "location.slash.fill")
+                        .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .frame(minHeight: 46)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
                 .disabled(activeCoordinate == nil)
             }
 
-            HStack(spacing: 8) {
-                compactActionButton(title: "收藏", systemImage: "star") {
-                    favoriteName = selectedName ?? ""
-                    isShowingFavoritePrompt = true
-                }
-                .disabled(selectedCoordinate == nil)
-
-                compactActionButton(title: "添加", systemImage: "plus.circle") {
+            HStack(spacing: 10) {
+                panelActionButton(title: "添加位置", systemImage: "plus.circle.fill") {
                     isShowingAddLocation = true
                 }
 
-                compactActionButton(
-                    title: "收藏夹 \(savedLocations.count)",
-                    systemImage: "star.fill"
+                panelActionButton(
+                    title: "收藏夹",
+                    systemImage: "star.fill",
+                    badge: "\(savedLocations.count)"
                 ) {
                     isShowingFavorites = true
                 }
             }
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: 560)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: .black.opacity(0.18), radius: 12, y: 5)
+        .background(.thickMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.2), radius: 16, y: 7)
     }
 
     private func mapErrorBanner(_ message: String) -> some View {
@@ -289,17 +299,30 @@ struct LocSimView: View {
         .buttonStyle(.plain)
     }
 
-    private func compactActionButton(
+    private func panelActionButton(
         title: String,
         systemImage: String,
+        badge: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.caption.weight(.medium))
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                Text(title)
+                if let badge {
+                    Text(badge)
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.14))
+                        .clipShape(Capsule())
+                }
+            }
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity)
+                .frame(minHeight: 42)
         }
         .buttonStyle(.bordered)
     }
@@ -314,7 +337,7 @@ struct LocSimView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         case .simulating:
-            Label("模拟中", systemImage: "location.fill")
+            Label("进行中", systemImage: "location.fill")
                 .font(.caption.weight(.semibold))
                 .foregroundColor(.green)
         case .stopped:
@@ -377,15 +400,6 @@ struct LocSimView: View {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
-    private func saveSelectedLocation() {
-        guard let selectedCoordinate else { return }
-        savedLocations = SavedLocationStore.add(
-            name: favoriteName,
-            coordinate: selectedCoordinate
-        )
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-    }
-
     private func reloadSavedLocations() {
         savedLocations = SavedLocationStore.load()
     }
@@ -415,7 +429,7 @@ private struct FavoriteLocationsView: View {
                             .foregroundColor(.secondary)
                         Text("还没有收藏位置")
                             .font(.headline)
-                        Text("可在地图页面收藏当前位置，或手动添加位置。")
+                        Text("点击“添加位置”保存当前位置，也可以手动输入坐标。")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
