@@ -234,7 +234,7 @@ struct LocSimView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
-                .disabled(selectedCoordinate == nil)
+                .disabled(selectedCoordinate == nil || activeCoordinate != nil)
 
                 Button(role: .destructive) {
                     stopSimulation()
@@ -386,7 +386,7 @@ struct LocSimView: View {
     }
 
     private func startSimulation() {
-        guard let selectedCoordinate else { return }
+        guard activeCoordinate == nil, let selectedCoordinate else { return }
         LocSimManager.start(at: selectedCoordinate)
         activeCoordinate = selectedCoordinate
         status = .simulating
