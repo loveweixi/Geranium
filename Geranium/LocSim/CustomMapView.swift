@@ -3,7 +3,8 @@ import SwiftUI
 
 struct MapCameraTarget: Equatable {
     let id = UUID()
-    let coordinate: SimulatedCoordinate
+    /// A nil coordinate means the map should return to the live system location.
+    let coordinate: SimulatedCoordinate?
 }
 
 struct CustomMapView: UIViewRepresentable {
@@ -52,20 +53,24 @@ struct CustomMapView: UIViewRepresentable {
                 for: selectedCoordinate,
                 on: mapView
             )
+        } else if selectedCoordinate == nil,
+                  context.coordinator.lastRenderedCoordinate != nil {
+            context.coordinator.clearSelection(on: mapView)
         }
 
         if let cameraTarget,
            context.coordinator.lastCameraTargetID != cameraTarget.id {
             context.coordinator.lastCameraTargetID = cameraTarget.id
-            context.coordinator.renderPin(
-                for: cameraTarget.coordinate,
-                on: mapView
-            )
-            context.coordinator.centerMap(
-                on: cameraTarget.coordinate,
-                mapView: mapView,
-                animated: true
-            )
+            if let coordinate = cameraTarget.coordinate {
+                context.coordinator.renderPin(for: coordinate, on: mapView)
+                context.coordinator.centerMap(
+                    on: coordinate,
+                    mapView: mapView,
+                    animated: true
+                )
+            } else {
+                context.coordinator.followSystemLocation(on: mapView)
+            }
         }
     }
 
@@ -102,6 +107,10 @@ struct CustomMapView: UIViewRepresentable {
             for coordinate: SimulatedCoordinate,
             on mapView: MKMapView
         ) {
+            if mapView.userTrackingMode != .none {
+                mapView.setUserTrackingMode(.none, animated: false)
+            }
+
             selectionPin.coordinate = CoordTransform.wgs84ToGcj02(
                 coordinate.coreLocationCoordinate
             )
@@ -110,6 +119,18 @@ struct CustomMapView: UIViewRepresentable {
                 mapView.addAnnotation(selectionPin)
             }
             lastRenderedCoordinate = coordinate
+        }
+
+        func clearSelection(on mapView: MKMapView) {
+            if mapView.annotations.contains(where: { $0 === selectionPin }) {
+                mapView.removeAnnotation(selectionPin)
+            }
+            lastRenderedCoordinate = nil
+        }
+
+        func followSystemLocation(on mapView: MKMapView) {
+            clearSelection(on: mapView)
+            mapView.setUserTrackingMode(.follow, animated: true)
         }
 
         func centerMap(

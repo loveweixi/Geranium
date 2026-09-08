@@ -223,7 +223,7 @@ struct LocSimView: View {
                 statusLabel
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button {
                     startSimulation()
                 } label: {
@@ -247,6 +247,17 @@ struct LocSimView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
                 .disabled(activeCoordinate == nil)
+
+                Button {
+                    restoreRealLocation()
+                } label: {
+                    Label("恢复", systemImage: "location.circle.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 46)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
             }
 
             HStack(spacing: 10) {
@@ -344,6 +355,10 @@ struct LocSimView: View {
             Text("已结束")
                 .font(.caption)
                 .foregroundColor(.secondary)
+        case .restored:
+            Label("已恢复", systemImage: "location.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.blue)
         }
     }
 
@@ -400,6 +415,17 @@ struct LocSimView: View {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
+    private func restoreRealLocation() {
+        LocSimManager.stop()
+        activeCoordinate = nil
+        selectedCoordinate = nil
+        selectedName = nil
+        mapCameraTarget = MapCameraTarget(coordinate: nil)
+        status = .restored
+        locationAuthorization.requestAuthorization()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
     private func reloadSavedLocations() {
         savedLocations = SavedLocationStore.load()
     }
@@ -409,6 +435,7 @@ struct LocSimView: View {
         case ready
         case simulating
         case stopped
+        case restored
     }
 }
 
