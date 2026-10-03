@@ -16,6 +16,7 @@
 		7989FD062B3486B100FBAB8D /* CustomMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7989FD052B3486B100FBAB8D /* CustomMapView.swift */; };
 		7989FD0A2B348A0200FBAB8D /* BookMarkHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7989FD092B348A0200FBAB8D /* BookMarkHelper.swift */; };
 		799488A62B347E2C00AFFDCF /* LocSimManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 799488A52B347E2C00AFFDCF /* LocSimManager.swift */; };
+		A20000000000000000000002 /* RouteSimulation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* RouteSimulation.swift */; };
 		A10000000000000000000003 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* InfoPlist.xcstrings */; };
 		F82C58042E37786D00F76DFA /* CoordTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82C58032E37786D00F76DFA /* CoordTransform.swift */; };
 		FAA456D52B265FEA00FC7287 /* GeraniumApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA456D42B265FEA00FC7287 /* GeraniumApp.swift */; };
@@ -60,6 +61,7 @@
 		7989FD092B348A0200FBAB8D /* BookMarkHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookMarkHelper.swift; sourceTree = "<group>"; };
 		799488A52B347E2C00AFFDCF /* LocSimManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LocSimManager.swift; sourceTree = "<group>"; };
 		799488A72B347E2F00AFFDCF /* LocSimPrivateHeaders.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LocSimPrivateHeaders.h; sourceTree = "<group>"; };
+		A20000000000000000000001 /* RouteSimulation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteSimulation.swift; sourceTree = "<group>"; };
 		A10000000000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000002 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; tabWidth = 2; };
 		F82C58032E37786D00F76DFA /* CoordTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordTransform.swift; sourceTree = "<group>"; };
@@ -130,6 +132,7 @@
 				7989FD022B347EEA00FBAB8D /* LocSimView.swift */,
 				7989FD052B3486B100FBAB8D /* CustomMapView.swift */,
 				799488A52B347E2C00AFFDCF /* LocSimManager.swift */,
+				A20000000000000000000001 /* RouteSimulation.swift */,
 				F82C58032E37786D00F76DFA /* CoordTransform.swift */,
 				7989FD0B2B348A8600FBAB8D /* BookMark */,
 				799488A72B347E2F00AFFDCF /* LocSimPrivateHeaders.h */,
@@ -285,6 +288,7 @@
 				7989FD032B347EEA00FBAB8D /* LocSimView.swift in Sources */,
 				7989FD062B3486B100FBAB8D /* CustomMapView.swift in Sources */,
 				799488A62B347E2C00AFFDCF /* LocSimManager.swift in Sources */,
+				A20000000000000000000002 /* RouteSimulation.swift in Sources */,
 				F82C58042E37786D00F76DFA /* CoordTransform.swift in Sources */,
 				7989FD0A2B348A0200FBAB8D /* BookMarkHelper.swift in Sources */,
 			);

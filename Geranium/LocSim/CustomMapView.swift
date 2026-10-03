@@ -7,12 +7,28 @@ struct MapCameraTarget: Equatable {
     let coordinate: SimulatedCoordinate?
 }
 
+/// A route whose coordinates are already in MapKit's display coordinate system.
+/// Create a new id whenever the route geometry changes.
+struct MapRouteOverlay {
+    let id: UUID
+    let displayCoordinates: [CLLocationCoordinate2D]
+
+    init(
+        id: UUID = UUID(),
+        displayCoordinates: [CLLocationCoordinate2D]
+    ) {
+        self.id = id
+        self.displayCoordinates = displayCoordinates
+    }
+}
+
 struct CustomMapView: UIViewRepresentable {
     @Binding var selectedCoordinate: SimulatedCoordinate?
     @Binding var selectedName: String?
     @Binding var errorMessage: String?
 
     let cameraTarget: MapCameraTarget?
+    var routeOverlay: MapRouteOverlay? = nil
 
     func makeUIView(context: Context) -> MKMapView {
         // Match the upstream construction path for iOS 15 compatibility. SwiftUI
@@ -47,15 +63,18 @@ struct CustomMapView: UIViewRepresentable {
     func updateUIView(_ mapView: MKMapView, context: Context) {
         context.coordinator.parent = self
 
-        if let selectedCoordinate,
-           context.coordinator.lastRenderedCoordinate != selectedCoordinate {
-            context.coordinator.renderPin(
-                for: selectedCoordinate,
-                on: mapView
-            )
-        } else if selectedCoordinate == nil,
-                  context.coordinator.lastRenderedCoordinate != nil {
-            context.coordinator.clearSelection(on: mapView)
+        if routeOverlay == nil {
+            if let selectedCoordinate,
+               (context.coordinator.lastRenderedCoordinate != selectedCoordinate
+                || !context.coordinator.isSelectionPinVisible(on: mapView)) {
+                context.coordinator.renderPin(
+                    for: selectedCoordinate,
+                    on: mapView
+                )
+            } else if selectedCoordinate == nil,
+                      context.coordinator.lastRenderedCoordinate != nil {
+                context.coordinator.clearSelection(on: mapView)
+            }
         }
 
         if let cameraTarget,
@@ -72,6 +91,17 @@ struct CustomMapView: UIViewRepresentable {
                 context.coordinator.followSystemLocation(on: mapView)
             }
         }
+
+        if context.coordinator.lastRouteOverlayID != routeOverlay?.id {
+            context.coordinator.renderRoute(routeOverlay, on: mapView)
+        }
+
+        // A point selected before entering route mode can coincide with the
+        // green start marker. Keep its state, but hide the duplicate pin until
+        // the route is dismissed.
+        if routeOverlay != nil {
+            context.coordinator.hideSelectionPin(on: mapView)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -81,20 +111,27 @@ struct CustomMapView: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var parent: CustomMapView
         let selectionPin = MKPointAnnotation()
+        let routeStartPin = MKPointAnnotation()
+        let routeEndPin = MKPointAnnotation()
         var lastRenderedCoordinate: SimulatedCoordinate?
         var lastCameraTargetID: UUID?
+        var lastRouteOverlayID: UUID?
 
         private var hasCenteredOnUser = false
         private var hasRenderedMap = false
+        private var routePolyline: MKPolyline?
 
         init(parent: CustomMapView) {
             self.parent = parent
             selectionPin.title = "已选位置"
+            routeStartPin.title = "起点"
+            routeEndPin.title = "终点"
         }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended,
-                  let mapView = gesture.view as? MKMapView else { return }
+                  let mapView = gesture.view as? MKMapView,
+                  parent.routeOverlay == nil else { return }
 
             let point = gesture.location(in: mapView)
             let mapCoordinate = mapView.convert(point, toCoordinateFrom: mapView)
@@ -122,15 +159,111 @@ struct CustomMapView: UIViewRepresentable {
         }
 
         func clearSelection(on mapView: MKMapView) {
-            if mapView.annotations.contains(where: { $0 === selectionPin }) {
+            hideSelectionPin(on: mapView)
+            lastRenderedCoordinate = nil
+        }
+
+        func isSelectionPinVisible(on mapView: MKMapView) -> Bool {
+            mapView.annotations.contains { $0 === selectionPin }
+        }
+
+        func hideSelectionPin(on mapView: MKMapView) {
+            if isSelectionPinVisible(on: mapView) {
                 mapView.removeAnnotation(selectionPin)
             }
-            lastRenderedCoordinate = nil
         }
 
         func followSystemLocation(on mapView: MKMapView) {
             clearSelection(on: mapView)
             mapView.setUserTrackingMode(.follow, animated: true)
+        }
+
+        func renderRoute(
+            _ route: MapRouteOverlay?,
+            on mapView: MKMapView
+        ) {
+            clearRoute(on: mapView)
+            lastRouteOverlayID = route?.id
+
+            guard let route else { return }
+
+            let coordinates = route.displayCoordinates.filter {
+                CLLocationCoordinate2DIsValid($0)
+                    && $0.latitude.isFinite
+                    && $0.longitude.isFinite
+            }
+            guard coordinates.count >= 2,
+                  let start = coordinates.first,
+                  let end = coordinates.last else { return }
+
+            // A previous "restore" action can leave the map following the live
+            // user location. Stop tracking before fitting a planned route so
+            // later location updates do not immediately pull the camera away.
+            if mapView.userTrackingMode != .none {
+                mapView.setUserTrackingMode(.none, animated: false)
+            }
+
+            routeStartPin.coordinate = start
+            routeEndPin.coordinate = end
+            mapView.addAnnotations([routeStartPin, routeEndPin])
+
+            let polyline = MKPolyline(
+                coordinates: coordinates,
+                count: coordinates.count
+            )
+            routePolyline = polyline
+            mapView.addOverlay(polyline, level: .aboveRoads)
+
+            if polyline.boundingMapRect.isNull || polyline.boundingMapRect.isEmpty {
+                mapView.setRegion(
+                    MKCoordinateRegion(
+                        center: start,
+                        span: MKCoordinateSpan(
+                            latitudeDelta: 0.02,
+                            longitudeDelta: 0.02
+                        )
+                    ),
+                    animated: true
+                )
+            } else {
+                // The route controls are overlaid on the bottom of the map and
+                // vary in height across iPhone/iPad and orientation. Reserve a
+                // proportional inset so both endpoints remain above the panel.
+                let mapHeight = mapView.bounds.height > 0
+                    ? mapView.bounds.height
+                    : UIScreen.main.bounds.height
+                let topInset = min(100, max(56, mapHeight * 0.10))
+                let desiredBottomInset = min(340, max(160, mapHeight * 0.45))
+                let bottomInset = min(
+                    desiredBottomInset,
+                    max(80, mapHeight - topInset - 100)
+                )
+                mapView.setVisibleMapRect(
+                    polyline.boundingMapRect,
+                    edgePadding: UIEdgeInsets(
+                        top: topInset,
+                        left: 36,
+                        bottom: bottomInset,
+                        right: 36
+                    ),
+                    animated: true
+                )
+            }
+        }
+
+        private func clearRoute(on mapView: MKMapView) {
+            if let routePolyline {
+                mapView.removeOverlay(routePolyline)
+            }
+            routePolyline = nil
+
+            let routeAnnotations: [MKAnnotation] = [routeStartPin, routeEndPin]
+                .filter { routeAnnotation in
+                    mapView.annotations.contains { $0 === routeAnnotation }
+                }
+            if !routeAnnotations.isEmpty {
+                mapView.removeAnnotations(routeAnnotations)
+            }
         }
 
         func centerMap(
@@ -153,6 +286,7 @@ struct CustomMapView: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, didUpdate userLocation: MKUserLocation) {
             guard !hasCenteredOnUser,
                   parent.selectedCoordinate == nil,
+                  parent.routeOverlay == nil,
                   let coordinate = userLocation.location?.coordinate else { return }
 
             hasCenteredOnUser = true
@@ -163,6 +297,60 @@ struct CustomMapView: UIViewRepresentable {
                 ),
                 animated: true
             )
+        }
+
+        func mapView(
+            _ mapView: MKMapView,
+            rendererFor overlay: MKOverlay
+        ) -> MKOverlayRenderer {
+            guard let routePolyline,
+                  let polyline = overlay as? MKPolyline,
+                  polyline === routePolyline else {
+                return MKOverlayRenderer(overlay: overlay)
+            }
+
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = .systemBlue
+            renderer.lineWidth = 6
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            return renderer
+        }
+
+        func mapView(
+            _ mapView: MKMapView,
+            viewFor annotation: MKAnnotation
+        ) -> MKAnnotationView? {
+            guard !(annotation is MKUserLocation) else { return nil }
+
+            let identifier: String
+            let tintColor: UIColor
+            let glyphText: String
+
+            if annotation === routeStartPin {
+                identifier = "route-start"
+                tintColor = .systemGreen
+                glyphText = "起"
+            } else if annotation === routeEndPin {
+                identifier = "route-end"
+                tintColor = .systemRed
+                glyphText = "终"
+            } else {
+                return nil
+            }
+
+            let annotationView = (
+                mapView.dequeueReusableAnnotationView(withIdentifier: identifier)
+                    as? MKMarkerAnnotationView
+            ) ?? MKMarkerAnnotationView(
+                annotation: annotation,
+                reuseIdentifier: identifier
+            )
+            annotationView.annotation = annotation
+            annotationView.markerTintColor = tintColor
+            annotationView.glyphText = glyphText
+            annotationView.displayPriority = .required
+            return annotationView
         }
 
         func mapViewDidFinishLoadingMap(_ mapView: MKMapView) {

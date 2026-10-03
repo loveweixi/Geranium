@@ -7,6 +7,7 @@ struct LocSimView: View {
     @StateObject private var locationAuthorization = LocationAuthorizationModel()
     @StateObject private var searchModel = LocationSearchModel()
 
+    @State private var interactionMode: InteractionMode = .point
     @State private var selectedCoordinate: SimulatedCoordinate?
     @State private var selectedName: String?
     @State private var activeCoordinate: SimulatedCoordinate?
@@ -19,6 +20,17 @@ struct LocSimView: View {
     @State private var isShowingFavorites = false
     @State private var status: Status = .waitingForSelection
 
+    @State private var routeStart: RouteWaypoint?
+    @State private var routeDestination: RouteWaypoint?
+    @State private var routeTransportMode: RouteTransportMode = .driving
+    @State private var routePlan: RouteSimulationPlan?
+    @State private var routeState: RouteState = .idle
+    @State private var routeErrorMessage: String?
+    @State private var routeEndpointTarget: RouteEndpointTarget?
+    @State private var activeRouteSession: ActiveRouteSession?
+    @State private var currentDirections: MKDirections?
+    @State private var routeRequestID: UUID?
+
     var body: some View {
         ZStack {
             Color(uiColor: .secondarySystemBackground)
@@ -28,14 +40,17 @@ struct LocSimView: View {
                 selectedCoordinate: $selectedCoordinate,
                 selectedName: $selectedName,
                 errorMessage: $mapErrorMessage,
-                cameraTarget: mapCameraTarget
+                cameraTarget: mapCameraTarget,
+                routeOverlay: currentRouteOverlay
             )
             .id(mapIdentity)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
 
             VStack(spacing: 10) {
-                searchPanel
+                if interactionMode == .point {
+                    searchPanel
+                }
 
                 if let mapErrorMessage {
                     mapErrorBanner(mapErrorMessage)
@@ -70,9 +85,20 @@ struct LocSimView: View {
                 }
             )
         }
+        .sheet(item: $routeEndpointTarget) { target in
+            RouteEndpointSearchView(
+                target: target,
+                nearbyCoordinate: routeSearchAnchor(for: target),
+                mapSelection: selectedCoordinate,
+                savedLocations: savedLocations
+            ) { waypoint in
+                setRouteEndpoint(target, waypoint: waypoint)
+            }
+        }
         .onAppear {
             locationAuthorization.requestAuthorization()
             reloadSavedLocations()
+            restoreRouteSessionIfNeeded()
         }
         .onChange(of: selectedCoordinate) { newCoordinate in
             guard newCoordinate != nil else { return }
@@ -83,7 +109,22 @@ struct LocSimView: View {
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .active {
                 reloadSavedLocations()
+                restoreRouteSessionIfNeeded()
             }
+        }
+        .onChange(of: routeTransportMode) { _ in
+            recalculateRouteIfPossible()
+        }
+        .onChange(of: interactionMode) { newMode in
+            guard newMode == .route,
+                  routeStart == nil,
+                  let selectedCoordinate else { return }
+            routeStart = RouteWaypoint(
+                name: selectedName ?? "地图选点",
+                coordinate: CoordTransform.wgs84ToGcj02(
+                    selectedCoordinate.coreLocationCoordinate
+                )
+            )
         }
     }
 
@@ -184,6 +225,33 @@ struct LocSimView: View {
 
     private var controlPanel: some View {
         VStack(spacing: 12) {
+            Picker("模拟方式", selection: $interactionMode) {
+                ForEach(InteractionMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(isAnySimulationActive)
+
+            if interactionMode == .point {
+                pointControlContent
+            } else {
+                routeControlContent
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: 560)
+        .background(.thickMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.2), radius: 16, y: 7)
+    }
+
+    private var pointControlContent: some View {
+        VStack(spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: selectedCoordinate == nil ? "hand.tap.fill" : "mappin.circle.fill")
                     .font(.title2)
@@ -274,15 +342,239 @@ struct LocSimView: View {
                 }
             }
         }
-        .padding(16)
-        .frame(maxWidth: 560)
-        .background(.thickMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+    }
+
+    @ViewBuilder
+    private var routeControlContent: some View {
+        if let activeRouteSession {
+            activeRouteContent(activeRouteSession)
+        } else {
+            routeDraftContent
         }
-        .shadow(color: .black.opacity(0.2), radius: 16, y: 7)
+    }
+
+    private var routeDraftContent: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                VStack(spacing: 0) {
+                    routeEndpointButton(
+                        title: "起点",
+                        waypoint: routeStart,
+                        color: .green
+                    ) {
+                        routeEndpointTarget = .start
+                    }
+                    .disabled(routeState == .starting)
+
+                    Divider()
+                        .padding(.leading, 38)
+
+                    routeEndpointButton(
+                        title: "终点",
+                        waypoint: routeDestination,
+                        color: .red
+                    ) {
+                        routeEndpointTarget = .destination
+                    }
+                    .disabled(routeState == .starting)
+                }
+                .background(Color(uiColor: .secondarySystemBackground).opacity(0.76))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Button {
+                    swapRouteEndpoints()
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.headline)
+                        .frame(width: 40, height: 82)
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    (routeStart == nil && routeDestination == nil)
+                        || routeState == .starting
+                )
+                .accessibilityLabel("交换起点和终点")
+            }
+
+            Picker("出行方式", selection: $routeTransportMode) {
+                ForEach(RouteTransportMode.allCases) { mode in
+                    Label(
+                        mode.displayName,
+                        systemImage: mode == .driving ? "car.fill" : "figure.walk"
+                    )
+                    .tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(routeState == .calculating || routeState == .starting)
+
+            if let routeErrorMessage {
+                Label(routeErrorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let routePlan {
+                HStack(spacing: 8) {
+                    Label(formatDistance(routePlan.distance), systemImage: "map")
+                    Text("·")
+                        .foregroundColor(.secondary)
+                    Label(
+                        "预计 \(formatDuration(routePlan.expectedTravelTime))",
+                        systemImage: "clock"
+                    )
+                    Spacer()
+                }
+                .font(.subheadline.weight(.medium))
+
+                HStack(spacing: 8) {
+                    routePrimaryButton(
+                        title: routeState == .starting ? "正在启动" : "开始",
+                        systemImage: routeState == .starting ? "hourglass" : "location.fill",
+                        color: .green
+                    ) {
+                        startRouteSimulation()
+                    }
+                    .disabled(routeState == .starting)
+
+                    Button {
+                        calculateRoute()
+                    } label: {
+                        Label("重算", systemImage: "arrow.clockwise")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: 46)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(routeState == .starting)
+                }
+            } else if routeState == .calculating {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("正在规划路线…")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                }
+                .frame(minHeight: 46)
+            } else {
+                routePrimaryButton(
+                    title: "规划路线",
+                    systemImage: "map.fill",
+                    color: .blue
+                ) {
+                    calculateRoute()
+                }
+                .disabled(routeStart == nil || routeDestination == nil)
+            }
+        }
+    }
+
+    private func activeRouteContent(_ session: ActiveRouteSession) -> some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: session.transportMode == .driving ? "car.fill" : "figure.walk")
+                    .font(.title2)
+                    .foregroundColor(.green)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Color.green.opacity(0.14)))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(session.startName.isEmpty ? "起点" : session.startName) → \(session.destinationName.isEmpty ? "终点" : session.destinationName)")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text("\(formatDistance(session.distance)) · \(session.transportMode.displayName)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+            }
+
+            TimelineView(.periodic(from: Date(), by: 1)) { context in
+                VStack(spacing: 6) {
+                    HStack {
+                        Text(context.date >= session.expectedArrivalAt ? "已到达" : "进行中")
+                            .fontWeight(.semibold)
+                            .foregroundColor(
+                                context.date >= session.expectedArrivalAt ? .blue : .green
+                            )
+                        Spacer()
+                        Text(routeRemainingText(session, at: context.date))
+                    }
+                    .font(.caption)
+
+                    ProgressView(value: session.progress(at: context.date))
+                        .tint(context.date >= session.expectedArrivalAt ? .blue : .green)
+
+                    Text("进度 \(Int(session.progress(at: context.date) * 100))%")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            HStack(spacing: 8) {
+                routePrimaryButton(title: "结束", systemImage: "location.slash.fill", color: .red) {
+                    stopRouteSimulation()
+                }
+                routePrimaryButton(title: "恢复", systemImage: "location.circle.fill", color: .blue) {
+                    restoreRealLocation()
+                }
+            }
+        }
+    }
+
+    private func routeEndpointButton(
+        title: String,
+        waypoint: RouteWaypoint?,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 10, height: 10)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(routeWaypointName(waypoint))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(waypoint == nil ? .secondary : .primary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func routePrimaryButton(
+        title: String,
+        systemImage: String,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 46)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(color)
+    }
+
+    private func routeWaypointName(_ waypoint: RouteWaypoint?) -> String {
+        guard let waypoint, !waypoint.name.isEmpty else { return "请选择" }
+        return waypoint.name
     }
 
     private func mapErrorBanner(_ message: String) -> some View {
@@ -362,6 +654,172 @@ struct LocSimView: View {
         }
     }
 
+    private var currentRouteOverlay: MapRouteOverlay? {
+        guard interactionMode == .route else { return nil }
+        if let routePlan {
+            return MapRouteOverlay(
+                id: routePlan.id,
+                displayCoordinates: routePlan.displayCoordinates
+            )
+        }
+        guard let activeRouteSession,
+              activeRouteSession.routeDisplayCoordinates.count >= 2 else { return nil }
+        return MapRouteOverlay(
+            id: activeRouteSession.id,
+            displayCoordinates: activeRouteSession.routeDisplayCoordinates.map(
+                \.coreLocationCoordinate
+            )
+        )
+    }
+
+    private var isAnySimulationActive: Bool {
+        activeCoordinate != nil || activeRouteSession != nil || routeState == .starting
+    }
+
+    private func routeSearchAnchor(
+        for target: RouteEndpointTarget
+    ) -> SimulatedCoordinate? {
+        let oppositeEndpoint = target == .start ? routeDestination : routeStart
+        guard let oppositeEndpoint else { return selectedCoordinate }
+        return SimulatedCoordinate(
+            CoordTransform.gcj02ToWgs84(oppositeEndpoint.coordinate)
+        )
+    }
+
+    private func setRouteEndpoint(
+        _ target: RouteEndpointTarget,
+        waypoint: RouteWaypoint
+    ) {
+        switch target {
+        case .start:
+            routeStart = waypoint
+        case .destination:
+            routeDestination = waypoint
+        }
+        recalculateRouteIfPossible()
+    }
+
+    private func swapRouteEndpoints() {
+        let oldStart = routeStart
+        routeStart = routeDestination
+        routeDestination = oldStart
+        recalculateRouteIfPossible()
+    }
+
+    private func recalculateRouteIfPossible() {
+        invalidateRoutePlan()
+        guard routeStart != nil, routeDestination != nil else { return }
+        calculateRoute()
+    }
+
+    private func invalidateRoutePlan() {
+        guard activeRouteSession == nil, routeState != .starting else { return }
+        currentDirections?.cancel()
+        currentDirections = nil
+        routeRequestID = nil
+        routePlan = nil
+        routeErrorMessage = nil
+        routeState = .idle
+    }
+
+    private func calculateRoute() {
+        guard let routeStart, let routeDestination else { return }
+
+        currentDirections?.cancel()
+        routePlan = nil
+        routeErrorMessage = nil
+        routeState = .calculating
+        let requestID = UUID()
+        routeRequestID = requestID
+
+        currentDirections = RouteSimulationPlanner.calculateRoute(
+            from: routeStart,
+            to: routeDestination,
+            mode: routeTransportMode
+        ) { result in
+            DispatchQueue.main.async {
+                guard routeRequestID == requestID else { return }
+                currentDirections = nil
+                routeRequestID = nil
+
+                switch result {
+                case .success(let plan):
+                    routePlan = plan
+                    routeState = .ready
+                case .failure(let error):
+                    routeErrorMessage = error.localizedDescription
+                    routeState = .idle
+                }
+            }
+        }
+    }
+
+    private func startRouteSimulation() {
+        guard activeCoordinate == nil,
+              activeRouteSession == nil,
+              let routePlan else { return }
+
+        routeState = .starting
+        routeErrorMessage = nil
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let session = try LocSimManager.start(route: routePlan)
+                DispatchQueue.main.async {
+                    activeRouteSession = session
+                    routeState = .active
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    routeErrorMessage = error.localizedDescription
+                    routeState = .ready
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                }
+            }
+        }
+    }
+
+    private func stopRouteSimulation() {
+        LocSimManager.stopRoute()
+        activeRouteSession = nil
+        routeState = routePlan == nil ? .stopped : .ready
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func restoreRouteSessionIfNeeded() {
+        guard activeRouteSession == nil,
+              let persistedSession = LocSimManager.activeRouteSession else { return }
+        activeRouteSession = persistedSession
+        interactionMode = .route
+        routeState = persistedSession.isEstimatedComplete ? .arrived : .active
+    }
+
+    private func formatDistance(_ distance: CLLocationDistance) -> String {
+        if distance < 1_000 {
+            return "\(Int(distance.rounded())) 米"
+        }
+        return String(format: "%.1f 公里", distance / 1_000)
+    }
+
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let totalMinutes = max(1, Int(ceil(duration / 60)))
+        if totalMinutes < 60 {
+            return "\(totalMinutes) 分钟"
+        }
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        return minutes == 0 ? "\(hours) 小时" : "\(hours) 小时 \(minutes) 分钟"
+    }
+
+    private func routeRemainingText(
+        _ session: ActiveRouteSession,
+        at date: Date
+    ) -> String {
+        let remaining = max(0, session.expectedArrivalAt.timeIntervalSince(date))
+        return remaining > 0 ? "剩余约 \(formatDuration(remaining))" : "已到达终点"
+    }
+
     private func performSearch() {
         searchModel.search(
             query: searchText,
@@ -401,7 +859,9 @@ struct LocSimView: View {
     }
 
     private func startSimulation() {
-        guard activeCoordinate == nil, let selectedCoordinate else { return }
+        guard activeCoordinate == nil,
+              activeRouteSession == nil,
+              let selectedCoordinate else { return }
         LocSimManager.start(at: selectedCoordinate)
         activeCoordinate = selectedCoordinate
         status = .simulating
@@ -416,10 +876,14 @@ struct LocSimView: View {
     }
 
     private func restoreRealLocation() {
-        LocSimManager.stop()
+        LocSimManager.restoreRealLocation()
         activeCoordinate = nil
+        activeRouteSession = nil
         selectedCoordinate = nil
         selectedName = nil
+        routePlan = nil
+        routeErrorMessage = nil
+        routeState = .restored
         mapCameraTarget = MapCameraTarget(coordinate: nil)
         status = .restored
         locationAuthorization.requestAuthorization()
@@ -436,6 +900,194 @@ struct LocSimView: View {
         case simulating
         case stopped
         case restored
+    }
+}
+
+private enum InteractionMode: String, CaseIterable, Identifiable {
+    case point
+    case route
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .point:
+            return "定点"
+        case .route:
+            return "轨迹"
+        }
+    }
+}
+
+private enum RouteEndpointTarget: String, Identifiable {
+    case start
+    case destination
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .start:
+            return "选择起点"
+        case .destination:
+            return "选择终点"
+        }
+    }
+}
+
+private enum RouteState: Equatable {
+    case idle
+    case calculating
+    case ready
+    case starting
+    case active
+    case arrived
+    case stopped
+    case restored
+}
+
+private struct RouteEndpointSearchView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var searchModel = LocationSearchModel()
+    @State private var query = ""
+
+    let target: RouteEndpointTarget
+    let nearbyCoordinate: SimulatedCoordinate?
+    let mapSelection: SimulatedCoordinate?
+    let savedLocations: [SavedLocation]
+    let onSelect: (RouteWaypoint) -> Void
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                    TextField("搜索地点或地址", text: $query)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .submitLabel(.search)
+                        .onSubmit(performSearch)
+
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                            searchModel.clear()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if searchModel.isSearching {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("搜索", action: performSearch)
+                            .font(.subheadline.weight(.semibold))
+                            .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                .padding(12)
+                .background(Color(uiColor: .secondarySystemBackground))
+
+                List {
+                    if let mapSelection {
+                        Section("地图") {
+                            Button {
+                                select(
+                                    name: "地图当前选点",
+                                    coordinate: CoordTransform.wgs84ToGcj02(
+                                        mapSelection.coreLocationCoordinate
+                                    )
+                                )
+                            } label: {
+                                Label("使用地图当前选点", systemImage: "mappin.circle.fill")
+                            }
+                        }
+                    }
+
+                    if !savedLocations.isEmpty {
+                        Section("收藏夹") {
+                            ForEach(savedLocations) { location in
+                                Button {
+                                    select(
+                                        name: location.name,
+                                        coordinate: CoordTransform.wgs84ToGcj02(
+                                            location.coordinate.coreLocationCoordinate
+                                        )
+                                    )
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(location.name)
+                                            .foregroundColor(.primary)
+                                        Text(coordinateText(location.coordinate))
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !searchModel.results.isEmpty {
+                        Section("搜索结果") {
+                            ForEach(searchModel.results) { result in
+                                Button {
+                                    select(name: result.name, coordinate: result.coordinate)
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "mappin.and.ellipse")
+                                            .foregroundColor(.accentColor)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(result.name)
+                                                .foregroundColor(.primary)
+                                            if !result.subtitle.isEmpty {
+                                                Text(result.subtitle)
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                    .lineLimit(2)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if let errorMessage = searchModel.errorMessage {
+                        Section {
+                            Label(errorMessage, systemImage: "magnifyingglass")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+            }
+            .navigationTitle(target.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private func performSearch() {
+        searchModel.search(query: query, near: nearbyCoordinate)
+    }
+
+    private func select(name: String, coordinate: CLLocationCoordinate2D) {
+        onSelect(RouteWaypoint(name: name, coordinate: coordinate))
+        dismiss()
+    }
+
+    private func coordinateText(_ coordinate: SimulatedCoordinate) -> String {
+        String(format: "%.6f, %.6f", coordinate.latitude, coordinate.longitude)
     }
 }
 
